@@ -110,6 +110,10 @@ pub unsafe trait QueryFilter: WorldQuery {
     ) -> bool;
 }
 
+pub trait InvertableFilter: QueryFilter {
+    type Inverse: QueryFilter;
+}
+
 /// Filter that selects entities with a component `C`.
 ///
 /// This can be used in a [`Query`](crate::system::Query) if entities are required to have the
@@ -153,7 +157,7 @@ macro_rules! count {
 }
 
 macro_rules! impl_with_query_filter_inner {
-    ($(#[$meta:meta])* $name:ty, $all_of:expr, $($component:ident),*) => {
+    ($(#[$meta:meta])* $ty:ty, $inv_ty:ty, $all_of:expr, $($component:ident),*) => {
         $(#[$meta])*
         #[expect(
             clippy::allow_attributes,
@@ -176,7 +180,7 @@ macro_rules! impl_with_query_filter_inner {
         /// This is sound because `fetch` does not access any components.
         /// `update_component_access` adds a `With` filter for `T`.
         /// This is sound because `matches_component_set` returns whether the set contains the component.
-        unsafe impl<$($component: Component),*> WorldQuery for With<$name> {
+        unsafe impl<$($component: Component),*> WorldQuery for With<$ty> {
             type Fetch<'w> = ();
             type Item<'w> = ();
             type State = [ComponentId; count!({$($component),*} 0)];
@@ -256,7 +260,7 @@ macro_rules! impl_with_query_filter_inner {
 
         $(#[$meta])*
         // SAFETY: WorldQuery impl performs no access at all
-        unsafe impl<$($component: Component),*> QueryFilter for With<$name> {
+        unsafe impl<$($component: Component),*> QueryFilter for With<$ty> {
             const IS_ARCHETYPAL: bool = true;
 
             #[inline(always)]
@@ -268,6 +272,10 @@ macro_rules! impl_with_query_filter_inner {
                 true
             }
         }
+
+        impl<$($component: Component),*> InvertableFilter for With<$ty> {
+            type Inverse = Without<$inv_ty>;
+        }
     };
 }
 
@@ -276,19 +284,21 @@ macro_rules! impl_with_query_filter {
         impl_with_query_filter_inner!(
             $(#[$meta])*
             ($($component,)*),
+            AnyOf<($($component,)*)>,
             true,
             $($component),*
         );
         impl_with_query_filter_inner!(
             $(#[$meta])*
             AnyOf<($($component,)*)>,
+            ($($component,)*),
             false,
             $($component),*
         );
     };
 }
 
-impl_with_query_filter_inner!(C, true, C);
+impl_with_query_filter_inner!(C, C, true, C);
 all_tuples!(
     #[doc(fake_variadic)]
     impl_with_query_filter,
@@ -329,7 +339,7 @@ all_tuples!(
 pub struct Without<T>(PhantomData<T>);
 
 macro_rules! impl_without_query_filter_inner {
-    ($(#[$meta:meta])* $name:ty, $all_of:expr, $($component:ident),*) => {
+    ($(#[$meta:meta])* $ty:ty, $inv_ty:ty, $all_of:expr, $($component:ident),*) => {
         $(#[$meta])*
         #[expect(
             clippy::allow_attributes,
@@ -352,7 +362,7 @@ macro_rules! impl_without_query_filter_inner {
         /// This is sound because `fetch` does not access any components.
         /// `update_component_access` adds a `With` filter for `T`.
         /// This is sound because `matches_component_set` returns whether the set contains the component.
-        unsafe impl<$($component: Component),*> WorldQuery for Without<$name> {
+        unsafe impl<$($component: Component),*> WorldQuery for Without<$ty> {
             type Fetch<'w> = ();
             type Item<'w> = ();
             type State = [ComponentId; count!({$($component),*} 0)];
@@ -432,7 +442,7 @@ macro_rules! impl_without_query_filter_inner {
 
         $(#[$meta])*
         // SAFETY: WorldQuery impl performs no access at all
-        unsafe impl<$($component: Component),*> QueryFilter for Without<$name> {
+        unsafe impl<$($component: Component),*> QueryFilter for Without<$ty> {
             const IS_ARCHETYPAL: bool = true;
 
             #[inline(always)]
@@ -444,6 +454,10 @@ macro_rules! impl_without_query_filter_inner {
                 true
             }
         }
+
+        impl<$($component: Component),*> InvertableFilter for Without<$ty> {
+            type Inverse = With<$inv_ty>;
+        }
     };
 }
 
@@ -452,19 +466,21 @@ macro_rules! impl_without_query_filter {
         impl_without_query_filter_inner!(
             $(#[$meta])*
             ($($component,)*),
+            AnyOf<($($component,)*)>,
             true,
             $($component),*
         );
         impl_without_query_filter_inner!(
             $(#[$meta])*
             AnyOf<($($component,)*)>,
+            ($($component,)*),
             false,
             $($component),*
         );
     };
 }
 
-impl_without_query_filter_inner!(C, true, C);
+impl_without_query_filter_inner!(C, C, true, C);
 all_tuples!(
     #[doc(fake_variadic)]
     impl_without_query_filter,
