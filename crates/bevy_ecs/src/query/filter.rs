@@ -1162,8 +1162,8 @@ unsafe impl<T: Component> QueryFilter for Changed<T> {
 )]
 pub trait ArchetypeFilter: QueryFilter {}
 
-impl<T: Component> ArchetypeFilter for With<T> {}
-impl<T: Component> ArchetypeFilter for Without<T> {}
+impl<T> ArchetypeFilter for With<T> where Self: QueryFilter {}
+impl<T> ArchetypeFilter for Without<T> where Self: QueryFilter {}
 
 macro_rules! impl_archetype_filter_tuple {
     ($(#[$meta:meta])* $($filter: ident),*) => {
