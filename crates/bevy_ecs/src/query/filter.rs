@@ -131,9 +131,11 @@ pub unsafe trait QueryFilter: WorldQuery {
 /// # #[derive(Component)]
 /// # struct IsBeautiful;
 /// # #[derive(Component)]
+/// # struct IsLovely;
+/// # #[derive(Component)]
 /// # struct Name { name: &'static str };
 /// #
-/// fn compliment_entity_system(query: Query<&Name, With<IsBeautiful>>) {
+/// fn compliment_entity_system(query: Query<&Name, With<(IsBeautiful, IsLovely)>>) {
 ///     for name in &query {
 ///         println!("{} is looking lovely today!", name.name);
 ///     }
