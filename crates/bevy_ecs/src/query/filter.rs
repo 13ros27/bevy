@@ -261,7 +261,6 @@ macro_rules! impl_with_query_filter_inner {
                 true
             }
         }
-
     };
 }
 
@@ -317,79 +316,140 @@ all_tuples!(
 /// ```
 pub struct Without<T>(PhantomData<T>);
 
-/// SAFETY:
-/// `update_component_access` does not add any accesses.
-/// This is sound because [`QueryFilter::filter_fetch`] does not access any components.
-/// `update_component_access` adds a `Without` filter for `T`.
-/// This is sound because `matches_component_set` returns whether the set does not contain the component.
-unsafe impl<T: Component> WorldQuery for Without<T> {
-    type Fetch<'w> = ();
-    type State = ComponentId;
+macro_rules! impl_without_query_filter_inner {
+    ($(#[$meta:meta])* $name:ty, $all_of:expr, $($component:ident),*) => {
+        $(#[$meta])*
+        #[expect(
+            clippy::allow_attributes,
+            reason = "This is a tuple-related macro; as such the lints below may not always apply."
+        )]
+        #[allow(
+            non_snake_case,
+            reason = "The names of some variables are provided by the macro's caller, not by us."
+        )]
+        #[allow(
+            unused_variables,
+            reason = "Zero-length tuples won't use any of the parameters."
+        )]
+        #[allow(
+            clippy::unused_unit,
+            reason = "Zero-length tuples will generate `init_state` equivalent to `()`; however this macro is meant for all applicable tuples."
+        )]
+        /// SAFETY:
+        /// `update_component_access` does not add any accesses.
+        /// This is sound because `fetch` does not access any components.
+        /// `update_component_access` adds a `Without` filter for `T`.
+        /// This is sound because `matches_component_set` returns whether the set contains the component.
+        unsafe impl<$($component: Component),*> WorldQuery for Without<$name> {
+            type Fetch<'w> = ();
+            type State = [ComponentId; count!({$($component),*} 0)];
 
-    fn shrink_fetch<'wlong: 'wshort, 'wshort>(_: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {}
+            fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {}
+            #[inline]
+            unsafe fn init_fetch(
+                _world: UnsafeWorldCell,
+                _state: &Self::State,
+                _last_run: Tick,
+                _this_run: Tick,
+            ) {}
 
-    #[inline]
-    unsafe fn init_fetch(
-        _world: UnsafeWorldCell,
-        _state: &ComponentId,
-        _last_run: Tick,
-        _this_run: Tick,
-    ) {
-    }
+            const IS_DENSE: bool = true $(&&
+                match $component::STORAGE_TYPE {
+                    StorageType::Table => true,
+                    StorageType::SparseSet => false,
+                }
+            )*;
 
-    const IS_DENSE: bool = {
-        match T::STORAGE_TYPE {
-            StorageType::Table => true,
-            StorageType::SparseSet => false,
+            #[inline]
+            unsafe fn set_archetype(
+                _fetch: &mut (),
+                _state: &Self::State,
+                _archetype: &Archetype,
+                _table: &Table,
+            ) {}
+            #[inline]
+            unsafe fn set_table(_fetch: &mut (), _state: &Self::State, _table: &Table) {}
+            #[inline(always)]
+            unsafe fn fetch<'w>(
+                _fetch: &mut Self::Fetch<'w>,
+                _entity: Entity,
+                _table_row: TableRow,
+            ) -> Self::Item<'w> {}
+
+            fn update_component_access(state: &Self::State, access: &mut FilteredAccess<ComponentId>) {
+                let [$($component),*] = state;
+                if $all_of {
+                    $(
+                        access.and_without(*$component);
+                    )*
+                } else {
+                    let mut new_access = FilteredAccess::matches_nothing();
+                    $(
+                        // Create an intermediate because `access`'s value needs to be preserved
+                        // for the next component, and `_new_access` has to be modified only by `append_or` to it.
+                        let mut intermediate = access.clone();
+                        intermediate.and_without(*$component);
+                        new_access.append_or(&intermediate);
+                    )*
+                    // The required components remain the same as the original `access`.
+                    new_access.required = core::mem::take(&mut access.required);
+
+                    *access = new_access;
+                }
+            }
+
+            fn matches_component_set(state: &Self::State, set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
+                let [$($component,)*] = state;
+                if $all_of {
+                    true $(&& !set_contains_id(*$component))*
+                } else {
+                    false $(|| !set_contains_id(*$component))*
+                }
+            }
+        }
+
+        $(#[$meta])*
+        // SAFETY: WorldQuery impl performs no access at all
+        unsafe impl<$($component: Component),*> QueryFilter for Without<$name> {
+            const IS_ARCHETYPAL: bool = true;
+
+            #[inline(always)]
+            unsafe fn filter_fetch(
+                _fetch: &mut Self::Fetch<'_>,
+                _entity: Entity,
+                _table_row: TableRow
+            ) -> bool {
+                true
+            }
         }
     };
-
-    #[inline]
-    unsafe fn set_archetype(
-        _fetch: &mut (),
-        _state: &ComponentId,
-        _archetype: &Archetype,
-        _table: &Table,
-    ) {
-    }
-
-    #[inline]
-    unsafe fn set_table(_fetch: &mut (), _state: &Self::State, _table: &Table) {}
-
-    #[inline]
-    fn update_component_access(&id: &ComponentId, access: &mut FilteredAccess<ComponentId>) {
-        access.and_without(id);
-    }
-
-    fn init_state(world: &mut World) -> ComponentId {
-        world.register_component::<T>()
-    }
-
-    fn get_state(components: &Components) -> Option<Self::State> {
-        components.component_id::<T>()
-    }
-
-    fn matches_component_set(
-        &id: &ComponentId,
-        set_contains_id: &impl Fn(ComponentId) -> bool,
-    ) -> bool {
-        !set_contains_id(id)
-    }
 }
 
-// SAFETY: WorldQuery impl performs no access at all
-unsafe impl<T: Component> QueryFilter for Without<T> {
-    const IS_ARCHETYPAL: bool = true;
-
-    #[inline(always)]
-    unsafe fn filter_fetch(
-        _fetch: &mut Self::Fetch<'_>,
-        _entity: Entity,
-        _table_row: TableRow,
-    ) -> bool {
-        true
-    }
+macro_rules! impl_without_query_filter {
+    ($(#[$meta:meta])* $($component:ident),*) => {
+        impl_without_query_filter_inner!(
+            $(#[$meta])*
+            ($($component,)*),
+            true,
+            $($component),*
+        );
+        impl_without_query_filter_inner!(
+            $(#[$meta])*
+            AnyOf<($($component,)*)>,
+            false,
+            $($component),*
+        );
+    };
 }
+
+impl_without_query_filter_inner!(C, true, C);
+all_tuples!(
+    #[doc(fake_variadic)]
+    impl_without_query_filter,
+    1,
+    15,
+    C
+);
 
 /// A filter that tests if any of the given filters apply.
 ///
