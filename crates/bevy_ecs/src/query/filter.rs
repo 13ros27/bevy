@@ -110,10 +110,14 @@ pub unsafe trait QueryFilter: WorldQuery {
     ) -> bool;
 }
 
-/// Filter that selects entities with all the components in a bundle `B`.
+/// Filter that selects entities with a component `C`.
 ///
 /// This can be used in a [`Query`](crate::system::Query) if entities are required to have the
-/// all of the components in `B` but you don't actually care about components value.
+/// component `C` but you don't actually care about components value.
+///
+/// You can also pass in a tuple of components `(C1, C2, ...)` in which case it will select
+/// entities that have _all_ of these components. If you instead want to select entities
+/// with any of a group of components you can use `With<AnyOf<(C1, C2, ...)>>`.
 ///
 /// This is the negation of [`Without`].
 ///
@@ -128,11 +132,9 @@ pub unsafe trait QueryFilter: WorldQuery {
 /// # #[derive(Component)]
 /// # struct IsBeautiful;
 /// # #[derive(Component)]
-/// # struct IsLovely;
-/// # #[derive(Component)]
 /// # struct Name { name: &'static str };
 /// #
-/// fn compliment_entity_system(query: Query<&Name, With<(IsBeautiful, IsLovely)>>) {
+/// fn compliment_entity_system(query: Query<&Name, With<IsBeautiful>>) {
 ///     for name in &query {
 ///         println!("{} is looking lovely today!", name.name);
 ///     }
@@ -295,7 +297,12 @@ all_tuples!(
     C
 );
 
-/// Filter that selects entities without a component `T`.
+/// Filter that selects entities without a component `C`.
+///
+/// You can also pass in a tuple of components `(C1, C2, ...)` in which case it will select
+/// entities that don't have _all_ of these components (they could still have some of them).
+/// If you instead want to select entities without any of a group of components you can use
+/// `Without<AnyOf<(C1, C2, ...)>>`.
 ///
 /// This is the negation of [`With`].
 ///
