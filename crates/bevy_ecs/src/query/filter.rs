@@ -289,7 +289,7 @@ impl_with_query_filter_inner!(C, true, C);
 all_tuples!(
     #[doc(fake_variadic)]
     impl_with_query_filter,
-    1,
+    2,
     15,
     C
 );
@@ -455,7 +455,7 @@ impl_without_query_filter_inner!(C, true, C);
 all_tuples!(
     #[doc(fake_variadic)]
     impl_without_query_filter,
-    1,
+    2,
     15,
     C
 );
