@@ -114,6 +114,12 @@ pub trait InvertableFilter: QueryFilter {
     type Inverse: QueryFilter;
 }
 
+#[expect(
+    type_alias_bounds,
+    reason = "While this isn't checked it make it clearer in docs what `Not` expects to be passed"
+)]
+pub type Not<F: InvertableFilter> = <F as InvertableFilter>::Inverse;
+
 /// Filter that selects entities with a component `C`.
 ///
 /// This can be used in a [`Query`](crate::system::Query) if entities are required to have the
