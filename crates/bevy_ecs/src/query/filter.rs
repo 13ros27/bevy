@@ -138,12 +138,12 @@ pub unsafe trait QueryFilter: WorldQuery {
 /// ```
 pub struct With<T>(PhantomData<T>);
 
-macro_rules! repeat {
-    ($token:ident {$_:ident $(, $repeating:ident)*} {$($repeated:ident,)*}) => {
-        repeat!{$token {$($repeating),*} {$token, $($repeated,)*}}
+macro_rules! count {
+    ({$_:ident $(, $repeating:ident)*} $count:expr) => {
+        count!({$($repeating),*} $count + 1)
     };
-    ($token:ident {} {$($repeated:ident,)*}) => {
-        ($($repeated,)*)
+    ({} $count:expr) => {
+        $count
     }
 }
 
@@ -173,7 +173,7 @@ macro_rules! impl_with_query_filter_inner {
         /// This is sound because `matches_component_set` returns whether the set contains the component.
         unsafe impl<$($component: Component),*> WorldQuery for With<$name> {
             type Fetch<'w> = ();
-            type State = repeat!{ComponentId {$($component),*} {}};
+            type State = [ComponentId; count!({$($component),*} 0)];
 
             fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {}
             #[inline]
@@ -208,7 +208,7 @@ macro_rules! impl_with_query_filter_inner {
             ) -> Self::Item<'w> {}
 
             fn update_component_access(state: &Self::State, access: &mut FilteredAccess<ComponentId>) {
-                let ($($component,)*) = state;
+                let [$($component),*] = state;
                 if $all_of {
                     $(
                         access.and_with(*$component);
@@ -221,21 +221,24 @@ macro_rules! impl_with_query_filter_inner {
                         let mut intermediate = access.clone();
                         intermediate.and_with(*$component);
                         new_access.append_or(&intermediate);
-                        // Also extend the accesses required to compute the filter. This is required because
-                        // otherwise a `Query<(), Or<(Changed<Foo>,)>` won't conflict with `Query<&mut Foo>`.
-                        new_access.extend_access(&intermediate);
                     )*
                     // The required components remain the same as the original `access`.
-                    // TODO: Do we care about required components in filters?
                     new_access.required = core::mem::take(&mut access.required);
 
                     *access = new_access;
                 }
             }
 
+            fn init_state(world: &mut World) -> Self::State {
+                [$(world.register_component::<$component>()),*]
+            }
+
+            fn get_state(components: &Components) -> Option<Self::State> {
+                Some([$(components.component_id::<$component>()?),*])
+            }
 
             fn matches_component_set(state: &Self::State, set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
-                let ($($component,)*) = state;
+                let [$($component,)*] = state;
                 if $all_of {
                     true $(&& set_contains_id(*$component))*
                 } else {
