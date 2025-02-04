@@ -279,6 +279,7 @@ macro_rules! impl_with_query_filter_inner {
             }
         }
 
+        $(#[$meta])*
         impl<$($component: Component),*> InvertableFilter for With<$ty> {
             type Inverse = Without<$inv_ty>;
         }
@@ -461,6 +462,7 @@ macro_rules! impl_without_query_filter_inner {
             }
         }
 
+        $(#[$meta])*
         impl<$($component: Component),*> InvertableFilter for Without<$ty> {
             type Inverse = With<$inv_ty>;
         }
@@ -691,6 +693,7 @@ macro_rules! impl_or_query_filter {
             }
         }
 
+        $(#[$meta])*
         impl<$($filter: InvertableFilter),*> InvertableFilter for Or<($($filter,)*)> {
             type Inverse = ($($filter::Inverse,)*);
         }
@@ -728,6 +731,7 @@ macro_rules! impl_tuple_query_filter {
             }
         }
 
+        $(#[$meta])*
         impl<$($name: InvertableFilter),*> InvertableFilter for ($($name,)*) {
             type Inverse = Or<($($name::Inverse,)*)>;
         }
