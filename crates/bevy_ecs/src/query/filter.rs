@@ -684,6 +684,10 @@ macro_rules! impl_or_query_filter {
                 unsafe { Self::fetch(fetch, entity, table_row) }
             }
         }
+
+        impl<$($filter: InvertableFilter),*> InvertableFilter for Or<($($filter,)*)> {
+            type Inverse = ($($filter::Inverse,)*);
+        }
     };
 }
 
@@ -718,6 +722,9 @@ macro_rules! impl_tuple_query_filter {
             }
         }
 
+        impl<$($name: InvertableFilter),*> InvertableFilter for ($($name,)*) {
+            type Inverse = Or<($($name::Inverse,)*)>;
+        }
     };
 }
 
