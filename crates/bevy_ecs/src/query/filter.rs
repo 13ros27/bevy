@@ -8,7 +8,7 @@ use crate::{
 };
 use bevy_ptr::{ThinSlicePtr, UnsafeCellDeref};
 use core::{cell::UnsafeCell, marker::PhantomData};
-use variadics_please::all_tuples;
+use variadics_please::{all_tuples, all_tuples_with_size};
 
 /// Types that filter the results of a [`Query`].
 ///
@@ -142,17 +142,8 @@ pub unsafe trait QueryFilter: WorldQuery {
 /// ```
 pub struct With<T>(PhantomData<T>);
 
-macro_rules! count {
-    ({$_:ident $(, $repeating:ident)*} $count:expr) => {
-        count!({$($repeating),*} $count + 1)
-    };
-    ({} $count:expr) => {
-        $count
-    }
-}
-
 macro_rules! impl_with_query_filter_inner {
-    ($(#[$meta:meta])* $name:ty, $all_of:expr, $($component:ident),*) => {
+    ($N:expr, $(#[$meta:meta])* $name:ty, $all_of:expr, $($component:ident),*) => {
         $(#[$meta])*
         #[expect(
             clippy::allow_attributes,
@@ -177,7 +168,7 @@ macro_rules! impl_with_query_filter_inner {
         /// This is sound because `matches_component_set` returns whether the set contains the component.
         unsafe impl<$($component: Component),*> WorldQuery for With<$name> {
             type Fetch<'w> = ();
-            type State = [ComponentId; count!({$($component),*} 0)];
+            type State = [ComponentId; $N];
 
             fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {}
             #[inline]
@@ -263,14 +254,16 @@ macro_rules! impl_with_query_filter_inner {
 }
 
 macro_rules! impl_with_query_filter {
-    ($(#[$meta:meta])* $($component:ident),*) => {
+    ($N:expr, $(#[$meta:meta])* $($component:ident),*) => {
         impl_with_query_filter_inner!(
+            $N,
             $(#[$meta])*
             ($($component,)*),
             true,
             $($component),*
         );
         impl_with_query_filter_inner!(
+            $N,
             $(#[$meta])*
             AnyOf<($($component,)*)>,
             false,
@@ -279,8 +272,8 @@ macro_rules! impl_with_query_filter {
     };
 }
 
-impl_with_query_filter_inner!(C, true, C);
-all_tuples!(
+impl_with_query_filter_inner!(1, C, true, C);
+all_tuples_with_size!(
     #[doc(fake_variadic)]
     impl_with_query_filter,
     1,
@@ -320,7 +313,7 @@ all_tuples!(
 pub struct Without<T>(PhantomData<T>);
 
 macro_rules! impl_without_query_filter_inner {
-    ($(#[$meta:meta])* $name:ty, $all_of:expr, $($component:ident),*) => {
+    ($N:expr, $(#[$meta:meta])* $name:ty, $all_of:expr, $($component:ident),*) => {
         $(#[$meta])*
         #[expect(
             clippy::allow_attributes,
@@ -345,7 +338,7 @@ macro_rules! impl_without_query_filter_inner {
         /// This is sound because `matches_component_set` returns whether the set contains the component.
         unsafe impl<$($component: Component),*> WorldQuery for Without<$name> {
             type Fetch<'w> = ();
-            type State = [ComponentId; count!({$($component),*} 0)];
+            type State = [ComponentId; $N];
 
             fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {}
             #[inline]
@@ -431,14 +424,16 @@ macro_rules! impl_without_query_filter_inner {
 }
 
 macro_rules! impl_without_query_filter {
-    ($(#[$meta:meta])* $($component:ident),*) => {
+    ($N:expr, $(#[$meta:meta])* $($component:ident),*) => {
         impl_without_query_filter_inner!(
+            $N,
             $(#[$meta])*
             ($($component,)*),
             true,
             $($component),*
         );
         impl_without_query_filter_inner!(
+            $N,
             $(#[$meta])*
             AnyOf<($($component,)*)>,
             false,
@@ -447,8 +442,8 @@ macro_rules! impl_without_query_filter {
     };
 }
 
-impl_without_query_filter_inner!(C, true, C);
-all_tuples!(
+impl_without_query_filter_inner!(1, C, true, C);
+all_tuples_with_size!(
     #[doc(fake_variadic)]
     impl_without_query_filter,
     1,
