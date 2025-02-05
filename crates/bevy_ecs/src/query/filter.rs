@@ -204,12 +204,6 @@ macro_rules! impl_with_query_filter_inner {
             ) {}
             #[inline]
             unsafe fn set_table(_fetch: &mut (), _state: &Self::State, _table: &Table) {}
-            #[inline(always)]
-            unsafe fn fetch<'w>(
-                _fetch: &mut Self::Fetch<'w>,
-                _entity: Entity,
-                _table_row: TableRow,
-            ) -> Self::Item<'w> {}
 
             fn update_component_access(state: &Self::State, access: &mut FilteredAccess<ComponentId>) {
                 let [$($component),*] = state;
@@ -378,12 +372,6 @@ macro_rules! impl_without_query_filter_inner {
             ) {}
             #[inline]
             unsafe fn set_table(_fetch: &mut (), _state: &Self::State, _table: &Table) {}
-            #[inline(always)]
-            unsafe fn fetch<'w>(
-                _fetch: &mut Self::Fetch<'w>,
-                _entity: Entity,
-                _table_row: TableRow,
-            ) -> Self::Item<'w> {}
 
             fn update_component_access(state: &Self::State, access: &mut FilteredAccess<ComponentId>) {
                 let [$($component),*] = state;
@@ -405,6 +393,14 @@ macro_rules! impl_without_query_filter_inner {
 
                     *access = new_access;
                 }
+            }
+
+            fn init_state(world: &mut World) -> Self::State {
+                [$(world.register_component::<$component>()),*]
+            }
+
+            fn get_state(components: &Components) -> Option<Self::State> {
+                Some([$(components.component_id::<$component>()?),*])
             }
 
             fn matches_component_set(state: &Self::State, set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
