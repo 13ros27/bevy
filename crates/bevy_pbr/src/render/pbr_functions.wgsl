@@ -282,7 +282,6 @@ fn apply_pbr_lighting(
     in: pbr_types::PbrInput,
 ) -> vec4<f32> {
     let specular_transmission = in.material.specular_transmission;
-    let specular_transmissive_color = specular_transmission * in.material.base_color.rgb;
 
     var direct_light: vec3<f32> = vec3<f32>(0.0);
 
@@ -430,45 +429,20 @@ fn apply_pbr_lighting(
     transmitted_light += transmitted_environment_light.diffuse * diffuse_transmissive_color;
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
 
-#ifdef STANDARD_MATERIAL_SPECULAR_TRANSMISSION
-    let specular_transmitted_environment_light = transmitted_environment_light.specular * specular_transmissive_color;
-#endif // STANDARD_MATERIAL_SPECULAR_TRANSMISSION
-
-#else // ENVIRONMENT_MAP
-    // If we don't have an environment map then we fill this with zero for
-    // `specular_transmissive_light` below.
-    let specular_transmitted_environment_light = vec3<f32>(0.0);
 #endif // ENVIRONMENT_MAP
 
 #ifdef STANDARD_MATERIAL_SPECULAR_TRANSMISSION
-    transmitted_light += transmission::specular_transmissive_light(
+    apply_specular_transmission(
+        &transmitted_light,
         in.world_position,
         in.frag_coord.xyz,
         view_z,
-        in.N,
-        in.V,
-        lighting_input.F0_,
-        in.material.ior,
-        in.material.thickness,
-        in.material.perceptual_roughness,
-        specular_transmissive_color,
-        specular_transmitted_environment_light
-    ).rgb;
-
-    if (in.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_ATTENUATION_ENABLED_BIT) != 0u {
-        // We reuse the `atmospheric_fog()` function here, as it's fundamentally
-        // equivalent to the attenuation that takes place inside the material volume,
-        // and will allow us to eventually hook up subsurface scattering more easily
-        var attenuation_fog: mesh_view_types::Fog;
-        attenuation_fog.base_color.a = 1.0;
-        attenuation_fog.be = pow(1.0 - in.material.attenuation_color.rgb, vec3<f32>(E)) / in.material.attenuation_distance;
-        // TODO: Add the subsurface scattering factor below
-        // attenuation_fog.bi = /* ... */
-        transmitted_light = bevy_pbr::fog::atmospheric_fog(
-            attenuation_fog, vec4<f32>(transmitted_light, 1.0), in.material.thickness,
-            vec3<f32>(0.0) // TODO: Pass in (pre-attenuated) scattered light contribution here
-        ).rgb;
-    }
+        lightmap_light,
+        in.material,
+#ifdef ENVIRONMENT_MAP
+        transmitted_environment_light,
+#endif // ENVIRONMENT_MAP
+    );
 #endif
 
     let indirect_light = calculate_indirect_light(
@@ -627,6 +601,64 @@ fn calculate_emissive_light(
 
     return emissive_light * mix(1.0, view_bindings::view.exposure, emissive.a);
 }
+
+#ifdef STANDARD_MATERIAL_SPECULAR_TRANSMISSION
+/// Applies any specular transmission to `transmitted_light`, mutating it.
+///
+/// - `world_position`, `frag_coord` and `material` are from `PbrInput`
+/// - `view_z` is from `apply_pbr_lighting`
+/// - `lighting_input` is from `construct_lighting_input`
+/// - `transmitted_environment_light` is from `calculate_transmitted_environment_light`
+fn apply_specular_transmission(
+    transmitted_light: ptr<function, vec3<f32>>,
+    world_position: vec4<f32>,
+    frag_coord: vec3<f32>,
+    view_z: f32,
+    lighting_input: lighting::LightingInput,
+    material: pbr_types::StandardMaterial,
+#ifdef STANDARD_MATERIAL_SPECULAR_TRANSMISSION
+    transmitted_environment_light: environment_map::EnvironmentMapLight,
+#endif // STANDARD_MATERIAL_SPECULAR_TRANSMISSION
+) {
+    let specular_transmissive_color = material.specular_transmission * material.base_color.rgb;
+
+#ifdef ENVIRONMENT_MAP
+    let specular_transmitted_environment_light = transmitted_environment_light.specular * specular_transmissive_color;
+#else // ENVIRONMENT_MAP
+    // If we don't have an environment map then we just say it produced no light.
+    let specular_transmitted_environment_light = vec3<f32>(0.0);
+#endif // ENVIRONMENT_MAP
+
+    *transmitted_light += transmission::specular_transmissive_light(
+        world_position,
+        frag_coord,
+        view_z,
+        lighting_input.N,
+        lighting_input.V,
+        lighting_input.F0_,
+        material.ior,
+        material.thickness,
+        material.perceptual_roughness,
+        specular_transmissive_color,
+        specular_transmitted_environment_light
+    ).rgb;
+
+    if (material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_ATTENUATION_ENABLED_BIT) != 0u {
+        // We reuse the `atmospheric_fog()` function here, as it's fundamentally
+        // equivalent to the attenuation that takes place inside the material volume,
+        // and will allow us to eventually hook up subsurface scattering more easily
+        var attenuation_fog: mesh_view_types::Fog;
+        attenuation_fog.base_color.a = 1.0;
+        attenuation_fog.be = pow(1.0 - material.attenuation_color.rgb, vec3<f32>(E)) / material.attenuation_distance;
+        // TODO: Add the subsurface scattering factor below
+        // attenuation_fog.bi = /* ... */
+        *transmitted_light = bevy_pbr::fog::atmospheric_fog(
+            attenuation_fog, vec4<f32>(*transmitted_light, 1.0), material.thickness,
+            vec3<f32>(0.0) // TODO: Pass in (pre-attenuated) scattered light contribution here
+        ).rgb;
+    }
+}
+#endif // STANDARD_MATERIAL_SPECULAR_TRANSMISSION
 
 #ifdef ENVIRONMENT_MAP
 #ifdef STANDARD_MATERIAL_DIFFUSE_OR_SPECULAR_TRANSMISSION
