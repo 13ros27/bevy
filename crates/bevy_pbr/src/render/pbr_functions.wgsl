@@ -571,80 +571,6 @@ fn apply_pbr_lighting(
     transmitted_light += ambient::ambient_light(diffuse_transmissive_lobe_world_position, -in.N, -in.V, 1.0, diffuse_transmissive_color, vec3<f32>(0.0), 1.0, vec3<f32>(1.0));
 #endif
 
-    // Diffuse indirect lighting can come from a variety of sources. The
-    // priority goes like this:
-    //
-    // 1. Lightmap (highest)
-    // 2. Irradiance volume
-    // 3. Environment map (lowest)
-    //
-    // When we find a source of diffuse indirect lighting, we stop accumulating
-    // any more diffuse indirect light. This avoids double-counting if, for
-    // example, both lightmaps and irradiance volumes are present.
-
-    var indirect_light = vec3(0.0f);
-    var found_diffuse_indirect = false;
-
-#ifdef LIGHTMAP
-    indirect_light += in.lightmap_light * diffuse_color;
-    found_diffuse_indirect = true;
-#endif
-
-#ifdef IRRADIANCE_VOLUME
-    // Irradiance volume light (indirect)
-    if (!found_diffuse_indirect) {
-        let irradiance_volume_light = irradiance_volume::irradiance_volume_light(
-            in.world_position.xyz,
-            in.N,
-            &clusterable_object_index_ranges,
-        );
-        indirect_light += irradiance_volume_light * diffuse_color * diffuse_occlusion;
-        found_diffuse_indirect = true;
-    }
-#endif
-
-    // Environment map light (indirect)
-#ifdef ENVIRONMENT_MAP
-
-#ifdef STANDARD_MATERIAL_ANISOTROPY
-    var bent_normal_lighting_input = lighting_input;
-    bend_normal_for_anisotropy(&bent_normal_lighting_input);
-    let environment_map_lighting_input = &bent_normal_lighting_input;
-#else   // STANDARD_MATERIAL_ANISOTROPY
-    let environment_map_lighting_input = &lighting_input;
-#endif  // STANDARD_MATERIAL_ANISOTROPY
-
-    let environment_light = environment_map::environment_map_light(
-        environment_map_lighting_input,
-        &clusterable_object_index_ranges,
-        found_diffuse_indirect,
-    );
-
-    // If screen space reflections are going to be used for this material, don't
-    // accumulate environment map light yet. The SSR shader will do it.
-#ifdef SCREEN_SPACE_REFLECTIONS
-    let use_ssr = perceptual_roughness <=
-        view_bindings::ssr_settings.perceptual_roughness_threshold;
-#else   // SCREEN_SPACE_REFLECTIONS
-    let use_ssr = false;
-#endif  // SCREEN_SPACE_REFLECTIONS
-
-    if (!use_ssr) {
-        let environment_light = environment_map::environment_map_light(
-            &lighting_input,
-            &clusterable_object_index_ranges,
-            found_diffuse_indirect
-        );
-
-        indirect_light += environment_light.diffuse * diffuse_occlusion +
-            environment_light.specular * specular_occlusion;
-    }
-
-#endif  // ENVIRONMENT_MAP
-
-    // Ambient light (indirect)
-    indirect_light += ambient::ambient_light(in.world_position, in.N, in.V, NdotV, diffuse_color, F0, perceptual_roughness, diffuse_occlusion);
-
     // we'll use the specular component of the transmitted environment
     // light in the call to `specular_transmissive_light()` below
     var specular_transmitted_environment_light = vec3<f32>(0.0);
@@ -727,7 +653,16 @@ fn apply_pbr_lighting(
     }
 #endif
 
-    var emissive_light = calculate_emissive_lighting(
+    let indirect_light = calculate_indirect_light(
+        in.lightmap_light,
+        in.diffuse_occlusion,
+        in.specular_occlusion,
+        in.world_position,
+        &lighting_input,
+        &clusterable_object_index_ranges,
+    );
+
+    let emissive_light = calculate_emissive_light(
         in.material.emissive,
         in.material.base_color.a,
 #ifdef STANDARD_MATERIAL_CLEARCOAT
@@ -752,12 +687,117 @@ fn apply_pbr_lighting(
     return output_color;
 }
 
-/// Calculates the emissive lighting of a material.
+/// Calculates the indirect light.
+///
+/// This takes the `lightmap_light`, `diffuse_occlusion`, `specular_occlusion`
+/// and `world_position` from `PbrInput` as well as the general `LightingInput`
+/// and `ClusterableObjectIndexRanges`.
+fn calculate_indirect_light(
+    lightmap_light: vec3<f32>,
+    diffuse_occlusion: vec3<f32>,
+    specular_occlusion: f32,
+    world_position: vec4<f32>, // This is only needed because `ambient_light` takes `vec4`
+    lighting_input: ptr<function, lighting::LightingInput>,
+    clusterable_object_index_ranges: ptr<function, clustering::ClusterableObjectIndexRanges>,
+) -> vec3<f32> {
+    let N = (*lighting_input).layers[LAYER_BASE].N;
+    let perceptual_roughness = (*lighting_input).layers[LAYER_BASE].perceptual_roughness;
+    let NdotV = (*lighting_input).layers[LAYER_BASE].NdotV;
+    let diffuse_color = (*lighting_input).diffuse_color;
+
+    // Diffuse indirect lighting can come from a variety of sources. The
+    // priority goes like this:
+    //
+    // 1. Lightmap (highest)
+    // 2. Irradiance volume
+    // 3. Environment map (lowest)
+    //
+    // When we find a source of diffuse indirect lighting, we stop accumulating
+    // any more diffuse indirect light. This avoids double-counting if, for
+    // example, both lightmaps and irradiance volumes are present.
+
+    var indirect_light = vec3(0.0f);
+    var found_diffuse_indirect = false;
+
+#ifdef LIGHTMAP
+    indirect_light += lightmap_light * diffuse_color;
+    found_diffuse_indirect = true;
+#endif // LIGHTMAP
+
+#ifdef IRRADIANCE_VOLUME
+    // Irradiance volume light (indirect)
+    if (!found_diffuse_indirect) {
+        let irradiance_volume_light = irradiance_volume::irradiance_volume_light(
+            (*lighting_input).P,
+            N,
+            clusterable_object_index_ranges,
+        );
+        indirect_light += irradiance_volume_light * diffuse_color * diffuse_occlusion;
+        found_diffuse_indirect = true;
+    }
+#endif // IRRADIANCE_VOLUME
+
+    // Environment map light (indirect)
+#ifdef ENVIRONMENT_MAP
+
+#ifdef STANDARD_MATERIAL_ANISOTROPY
+    var bent_normal_lighting_input = *lighting_input;
+    bend_normal_for_anisotropy(&bent_normal_lighting_input);
+    let environment_map_lighting_input = &bent_normal_lighting_input;
+#else   // STANDARD_MATERIAL_ANISOTROPY
+    let environment_map_lighting_input = lighting_input;
+#endif  // STANDARD_MATERIAL_ANISOTROPY
+
+    // TODO: Unused?
+    let environment_light = environment_map::environment_map_light(
+        environment_map_lighting_input,
+        clusterable_object_index_ranges,
+        found_diffuse_indirect,
+    );
+
+    // If screen space reflections are going to be used for this material, don't
+    // accumulate environment map light yet. The SSR shader will do it.
+#ifdef SCREEN_SPACE_REFLECTIONS
+    let use_ssr = perceptual_roughness <=
+        view_bindings::ssr_settings.perceptual_roughness_threshold;
+#else   // SCREEN_SPACE_REFLECTIONS
+    let use_ssr = false;
+#endif  // SCREEN_SPACE_REFLECTIONS
+
+    if (!use_ssr) {
+        let environment_light = environment_map::environment_map_light(
+            lighting_input,
+            clusterable_object_index_ranges,
+            found_diffuse_indirect
+        );
+
+        indirect_light += environment_light.diffuse * diffuse_occlusion +
+            environment_light.specular * specular_occlusion;
+    }
+
+#endif // ENVIRONMENT_MAP
+
+    // Ambient light (indirect)
+    indirect_light += ambient::ambient_light(
+        world_position,
+        N,
+        (*lighting_input).V,
+        NdotV,
+        diffuse_color,
+        (*lighting_input).F0_,
+        perceptual_roughness,
+        diffuse_occlusion
+    );
+
+    return indirect_light;
+}
+
+/// Calculates the emissive lighting.
 ///
 /// This takes the materials `emissive` vector and the `alpha` of its `base_color`.
 ///
 /// If `STANDARD_MATERIAL_CLEARCOAT` is enabled, it also takes the clearcoat's `NdotV`.
-fn calculate_emissive_lighting(
+fn calculate_emissive_light(
     emissive: vec4<f32>,
     base_alpha: f32,
 #ifdef STANDARD_MATERIAL_CLEARCOAT
