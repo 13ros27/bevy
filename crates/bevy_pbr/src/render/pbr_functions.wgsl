@@ -283,7 +283,6 @@ fn apply_pbr_lighting(
 ) -> vec4<f32> {
     var output_color: vec4<f32> = in.material.base_color;
 
-    // calculate non-linear roughness from linear perceptualRoughness
     let metallic = in.material.metallic;
     let ior = in.material.ior;
     let thickness = in.material.thickness;
@@ -912,6 +911,7 @@ fn construct_lighting_input(pbr_input: pbr_types::PbrInput) -> lighting::Lightin
     lighting_input.layers[LAYER_BASE].NdotV = NdotV;
 
     lighting_input.layers[LAYER_BASE].perceptual_roughness = material.perceptual_roughness;
+    // calculate non-linear roughness from linear perceptualRoughness
     lighting_input.layers[LAYER_BASE].roughness =
         lighting::perceptualRoughnessToRoughness(material.perceptual_roughness);
 
