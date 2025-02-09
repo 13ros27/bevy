@@ -328,9 +328,9 @@ fn apply_pbr_lighting(
     transmissive_lighting_input.clearcoat_strength = 0.0;
 #endif  // STANDARD_MATERIAL_CLEARCOAT
 #ifdef STANDARD_MATERIAL_ANISOTROPY
-    lighting_input.anisotropy = in.anisotropy_strength;
-    lighting_input.Ta = in.anisotropy_T;
-    lighting_input.Ba = in.anisotropy_B;
+    transmissive_lighting_input.anisotropy = in.anisotropy_strength;
+    transmissive_lighting_input.Ta = in.anisotropy_T;
+    transmissive_lighting_input.Ba = in.anisotropy_B;
 #endif  // STANDARD_MATERIAL_ANISOTROPY
 #endif  // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
 
@@ -549,8 +549,8 @@ fn apply_pbr_lighting(
     transmissive_environment_light_input.layers[LAYER_BASE].N = -in.N;
     transmissive_environment_light_input.V = in.V;
     transmissive_environment_light_input.layers[LAYER_BASE].R = T;
-    transmissive_environment_light_input.layers[LAYER_BASE].perceptual_roughness = perceptual_roughness;
-    transmissive_environment_light_input.layers[LAYER_BASE].roughness = roughness;
+    transmissive_environment_light_input.layers[LAYER_BASE].perceptual_roughness = lighting_input.perceptual_roughness;
+    transmissive_environment_light_input.layers[LAYER_BASE].roughness = lighting_input.roughness;
     transmissive_environment_light_input.F0_ = vec3<f32>(1.0);
     transmissive_environment_light_input.F_ab = vec2(0.1);
 #ifdef STANDARD_MATERIAL_CLEARCOAT
