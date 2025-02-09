@@ -281,21 +281,8 @@ fn calculate_F0(base_color: vec3<f32>, metallic: f32, reflectance: vec3<f32>) ->
 fn apply_pbr_lighting(
     in: pbr_types::PbrInput,
 ) -> vec4<f32> {
-    var output_color: vec4<f32> = in.material.base_color;
-
-    let metallic = in.material.metallic;
-    let ior = in.material.ior;
-    let thickness = in.material.thickness;
-    let diffuse_transmission = in.material.diffuse_transmission;
     let specular_transmission = in.material.specular_transmission;
-
     let specular_transmissive_color = specular_transmission * in.material.base_color.rgb;
-
-    // Diffuse transmissive strength is inversely related to metallicity and specular transmission, but directly related to diffuse transmission
-    let diffuse_transmissive_color = output_color.rgb * (1.0 - metallic) * (1.0 - specular_transmission) * diffuse_transmission;
-
-    // Calculate the world position of the second Lambertian lobe used for diffuse transmission, by subtracting material thickness
-    let diffuse_transmissive_lobe_world_position = in.world_position - vec4<f32>(in.world_normal, 0.0) * thickness;
 
     var direct_light: vec3<f32> = vec3<f32>(0.0);
 
@@ -308,14 +295,23 @@ fn apply_pbr_lighting(
     // And do the same for transmissive if we need to.
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
     var transmissive_lighting_input: lighting::LightingInput;
-    transmissive_lighting_input.layers[LAYER_BASE].NdotV = 1.0;
+
     transmissive_lighting_input.layers[LAYER_BASE].N = -in.N;
     transmissive_lighting_input.layers[LAYER_BASE].R = vec3(0.0);
+    transmissive_lighting_input.layers[LAYER_BASE].NdotV = 1.0;
     transmissive_lighting_input.layers[LAYER_BASE].perceptual_roughness = 1.0;
     transmissive_lighting_input.layers[LAYER_BASE].roughness = 1.0;
+
+    // Calculate the world position of the second Lambertian lobe used for diffuse transmission, by subtracting material thickness
+    let diffuse_transmissive_lobe_world_position = in.world_position - vec4<f32>(in.world_normal, 0.0) * in.material.thickness;
     transmissive_lighting_input.P = diffuse_transmissive_lobe_world_position.xyz;
-    transmissive_lighting_input.V = -in.V;
+
+    // Diffuse transmissive strength is inversely related to metallicity and specular transmission, but directly related to diffuse transmission
+    let diffuse_transmissive_color = in.material.base_color.rgb * (1.0 - in.material.metallic) *
+        (1.0 - specular_transmission) * in.material.diffuse_transmission;
     transmissive_lighting_input.diffuse_color = diffuse_transmissive_color;
+
+    transmissive_lighting_input.V = -in.V;
     transmissive_lighting_input.F0_ = vec3(0.0);
     transmissive_lighting_input.F_ab = vec2(0.1);
 #ifdef STANDARD_MATERIAL_CLEARCOAT
@@ -452,8 +448,8 @@ fn apply_pbr_lighting(
         in.N,
         in.V,
         lighting_input.F0_,
-        ior,
-        thickness,
+        in.material.ior,
+        in.material.thickness,
         in.material.perceptual_roughness,
         specular_transmissive_color,
         specular_transmitted_environment_light
@@ -469,7 +465,7 @@ fn apply_pbr_lighting(
         // TODO: Add the subsurface scattering factor below
         // attenuation_fog.bi = /* ... */
         transmitted_light = bevy_pbr::fog::atmospheric_fog(
-            attenuation_fog, vec4<f32>(transmitted_light, 1.0), thickness,
+            attenuation_fog, vec4<f32>(transmitted_light, 1.0), in.material.thickness,
             vec3<f32>(0.0) // TODO: Pass in (pre-attenuated) scattered light contribution here
         ).rgb;
     }
@@ -493,9 +489,9 @@ fn apply_pbr_lighting(
     );
 
     // Total light
-    output_color = vec4<f32>(
+    var output_color = vec4<f32>(
         (view_bindings::view.exposure * (transmitted_light + direct_light + indirect_light)) + emissive_light,
-        output_color.a
+        in.material.base_color.a
     );
 
     output_color = clustering::cluster_debug_visualization(
