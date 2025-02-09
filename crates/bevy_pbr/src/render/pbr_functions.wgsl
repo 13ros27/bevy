@@ -344,22 +344,28 @@ fn apply_pbr_lighting(
     var clusterable_object_index_ranges =
         clustering::unpack_clusterable_object_index_ranges(cluster_index);
 
+    var light_contribution_input: LightContributionInput;
+    light_contribution_input.world_position = in.world_position;
+    light_contribution_input.world_normal = in.world_normal;
+    light_contribution_input.flags = in.flags;
+    light_contribution_input.lighting_input = lighting_input;
+#ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
+    light_contribution_input.diffuse_transmissive_lobe_world_position =
+        diffuse_transmissive_lobe_world_position;
+    light_contribution_input.transmissive_lighting_input = transmissive_lighting_input;
+#endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
+
     // Point lights (direct)
     for (var i: u32 = clusterable_object_index_ranges.first_point_light_index_offset;
             i < clusterable_object_index_ranges.first_spot_light_index_offset;
             i = i + 1u) {
         let light_id = clustering::get_clusterable_object_id(i);
 
-        calculate_point_light_contribution(
+        contribute_point_light(
             light_id,
-            in.world_position,
-            in.world_normal,
-            in.flags,
-            &lighting_input,
+            light_contribution_input,
             &direct_light,
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
-            diffuse_transmissive_lobe_world_position,
-            &transmissive_lighting_input,
             &transmitted_light,
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
         );
@@ -371,22 +377,17 @@ fn apply_pbr_lighting(
             i = i + 1u) {
         let light_id = clustering::get_clusterable_object_id(i);
 
-        calculate_spot_light_contribution(
+        contribute_spot_light(
             light_id,
-            in.world_position,
-            in.world_normal,
-            in.flags,
-            &lighting_input,
+            light_contribution_input,
             &direct_light,
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
-            diffuse_transmissive_lobe_world_position,
-            &transmissive_lighting_input,
             &transmitted_light,
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
         );
     }
 
-    // directional lights (direct)
+    // Directional lights (direct)
     let n_directional_lights = view_bindings::lights.n_directional_lights;
     for (var light_id: u32 = 0u; light_id < n_directional_lights; light_id = light_id + 1u) {
         // check if this light should be skipped, which occurs if this light does not intersect with the view
@@ -395,17 +396,12 @@ fn apply_pbr_lighting(
             continue;
         }
 
-        calculate_directional_light_contribution(
+        contribute_directional_light(
             light_id,
-            in.world_position,
-            in.world_normal,
-            in.flags,
+            light_contribution_input,
             view_z,
-            &lighting_input,
             &direct_light,
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
-            diffuse_transmissive_lobe_world_position,
-            &transmissive_lighting_input,
             &transmitted_light,
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
         );
@@ -676,24 +672,32 @@ fn calculate_emissive_light(
     return emissive_light * mix(1.0, view_bindings::view.exposure, emissive.a);
 }
 
-/// Calculates the contribution of a point light to `direct_light` and potentially `transmitted_light`.
+/// Input to a function calculating the contribution of a single light
+/// (`point_light_contribution`, `spot_light_contribution`,
+/// `directional_light_contribution`).
 ///
-/// Inputs:
-///  - `light_id` of a point light
-///  - `world_position`, `world_normal` and `flags` from `PbrInput`
-///  - `lighting_input`, `diffuse_transmissive_lobe_world_position` and
-///     `transmissive_lighting_input` from `apply_pbr_lighting`
-///  - `direct_light` and `transmitted_light` are mutated to add the contributions of this light
-fn calculate_point_light_contribution(
-    light_id: u32,
+/// - `world_position`, `world_normal` and `flags` from `PbrInput`
+/// - `lighting_input`, `diffuse_transmissive_lobe_world_position` and
+///    `transmissive_lighting_input` from `apply_pbr_lighting`
+struct LightContributionInput {
     world_position: vec4<f32>,
     world_normal: vec3<f32>,
     flags: u32,
-    lighting_input: ptr<function, lighting::LightingInput>,
-    direct_light: ptr<function, vec3<f32>>,
+    lighting_input: lighting::LightingInput,
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
     diffuse_transmissive_lobe_world_position: vec4<f32>,
-    transmissive_lighting_input: ptr<function, lighting::LightingInput>,
+    transmissive_lighting_input: lighting::LightingInput,
+#endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
+}
+
+/// Adds the contribution of a point light to `direct_light` and potentially `transmitted_light`.
+///
+/// `light_id` should address a point light in `view_bindings::clusterable_objects.data`.
+fn contribute_point_light(
+    light_id: u32,
+    in: LightContributionInput,
+    direct_light: ptr<function, vec3<f32>>,
+#ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
     transmitted_light: ptr<function, vec3<f32>>,
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
 ) {
@@ -708,12 +712,13 @@ fn calculate_point_light_contribution(
 #endif // LIGHTMAP
 
     var shadow: f32 = 1.0;
-    if ((flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+    if ((in.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
             && (view_bindings::clusterable_objects.data[light_id].flags & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
-        shadow = shadows::fetch_point_shadow(light_id, world_position, world_normal);
+        shadow = shadows::fetch_point_shadow(light_id, in.world_position, in.world_normal);
     }
 
-    let light_contrib = lighting::point_light(light_id, lighting_input, enable_diffuse);
+    var lighting_input = in.lighting_input;
+    let light_contrib = lighting::point_light(light_id, &lighting_input, enable_diffuse);
     *direct_light += light_contrib * shadow;
 
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
@@ -727,27 +732,26 @@ fn calculate_point_light_contribution(
     // F_ab = vec2<f32>(0.1)
     // F0 = vec3<f32>(0.0)
     var transmitted_shadow: f32 = 1.0;
-    if ((flags & (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)) == (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)
+    if ((in.flags & (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)) == (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)
             && (view_bindings::clusterable_objects.data[light_id].flags & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
-        transmitted_shadow = shadows::fetch_point_shadow(light_id, diffuse_transmissive_lobe_world_position, -world_normal);
+        transmitted_shadow = shadows::fetch_point_shadow(light_id, in.diffuse_transmissive_lobe_world_position, -in.world_normal);
     }
 
+    var transmissive_lighting_input = in.transmissive_lighting_input;
     let transmitted_light_contrib =
-        lighting::point_light(light_id, transmissive_lighting_input, enable_diffuse);
+        lighting::point_light(light_id, &transmissive_lighting_input, enable_diffuse);
     *transmitted_light += transmitted_light_contrib * transmitted_shadow;
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
 }
 
-fn calculate_spot_light_contribution(
+/// Adds the contribution of a spot light to `direct_light` and potentially `transmitted_light`.
+///
+/// `light_id` should address a spot light in `view_bindings::clusterable_objects.data`.
+fn contribute_spot_light(
     light_id: u32,
-    world_position: vec4<f32>,
-    world_normal: vec3<f32>,
-    flags: u32,
-    lighting_input: ptr<function, lighting::LightingInput>,
+    in: LightContributionInput,
     direct_light: ptr<function, vec3<f32>>,
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
-    diffuse_transmissive_lobe_world_position: vec4<f32>,
-    transmissive_lighting_input: ptr<function, lighting::LightingInput>,
     transmitted_light: ptr<function, vec3<f32>>,
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
 ) {
@@ -762,18 +766,19 @@ fn calculate_spot_light_contribution(
 #endif // LIGHTMAP
 
     var shadow: f32 = 1.0;
-    if ((flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+    if ((in.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
             && (view_bindings::clusterable_objects.data[light_id].flags &
                 mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
         shadow = shadows::fetch_spot_shadow(
             light_id,
-            world_position,
-            world_normal,
+            in.world_position,
+            in.world_normal,
             view_bindings::clusterable_objects.data[light_id].shadow_map_near_z,
         );
     }
 
-    let light_contrib = lighting::spot_light(light_id, lighting_input, enable_diffuse);
+    var lighting_input = in.lighting_input;
+    let light_contrib = lighting::spot_light(light_id, &lighting_input, enable_diffuse);
     *direct_light += light_contrib * shadow;
 
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
@@ -787,33 +792,30 @@ fn calculate_spot_light_contribution(
     // F_ab = vec2<f32>(0.1)
     // F0 = vec3<f32>(0.0)
     var transmitted_shadow: f32 = 1.0;
-    if ((flags & (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)) == (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)
+    if ((in.flags & (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)) == (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)
             && (view_bindings::clusterable_objects.data[light_id].flags & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
         transmitted_shadow = shadows::fetch_spot_shadow(
             light_id,
-            diffuse_transmissive_lobe_world_position,
-            -world_normal,
+            in.diffuse_transmissive_lobe_world_position,
+            -in.world_normal,
             view_bindings::clusterable_objects.data[light_id].shadow_map_near_z,
         );
     }
 
+    var transmissive_lighting_input = in.transmissive_lighting_input;
     let transmitted_light_contrib =
-        lighting::spot_light(light_id, transmissive_lighting_input, enable_diffuse);
+        lighting::spot_light(light_id, &transmissive_lighting_input, enable_diffuse);
     *transmitted_light += transmitted_light_contrib * transmitted_shadow;
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
 }
 
-fn calculate_directional_light_contribution(
+/// Adds the contribution of a directional light to `direct_light` and potentially `transmitted_light`.
+fn contribute_directional_light(
     light_id: u32,
-    world_position: vec4<f32>,
-    world_normal: vec3<f32>,
-    flags: u32,
+    in: LightContributionInput,
     view_z: f32,
-    lighting_input: ptr<function, lighting::LightingInput>,
     direct_light: ptr<function, vec3<f32>>,
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
-    diffuse_transmissive_lobe_world_position: vec4<f32>,
-    transmissive_lighting_input: ptr<function, lighting::LightingInput>,
     transmitted_light: ptr<function, vec3<f32>>,
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
 ) {
@@ -829,12 +831,13 @@ fn calculate_directional_light_contribution(
 #endif // LIGHTMAP
 
     var shadow: f32 = 1.0;
-    if ((flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+    if ((in.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
             && (view_bindings::lights.directional_lights[light_id].flags & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
-        shadow = shadows::fetch_directional_shadow(light_id, world_position, world_normal, view_z);
+        shadow = shadows::fetch_directional_shadow(light_id, in.world_position, in.world_normal, view_z);
     }
 
-    var light_contrib = lighting::directional_light(light_id, lighting_input, enable_diffuse);
+    var lighting_input = in.lighting_input;
+    var light_contrib = lighting::directional_light(light_id, &lighting_input, enable_diffuse);
 
 #ifdef DIRECTIONAL_LIGHT_SHADOW_MAP_DEBUG_CASCADES
     light_contrib = shadows::cascade_debug_visualization(light_contrib, light_id, view_z);
@@ -852,13 +855,19 @@ fn calculate_directional_light_contribution(
     // F_ab = vec2<f32>(0.1)
     // F0 = vec3<f32>(0.0)
     var transmitted_shadow: f32 = 1.0;
-    if ((flags & (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)) == (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)
+    if ((in.flags & (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)) == (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)
             && (view_bindings::lights.directional_lights[light_id].flags & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
-        transmitted_shadow = shadows::fetch_directional_shadow(light_id, diffuse_transmissive_lobe_world_position, -world_normal, view_z);
+        transmitted_shadow = shadows::fetch_directional_shadow(
+            light_id,
+            in.diffuse_transmissive_lobe_world_position,
+            -in.world_normal,
+            view_z
+        );
     }
 
+    var transmissive_lighting_input = in.transmissive_lighting_input;
     let transmitted_light_contrib =
-        lighting::directional_light(light_id, transmissive_lighting_input, enable_diffuse);
+        lighting::directional_light(light_id, &transmissive_lighting_input, enable_diffuse);
     *transmitted_light += transmitted_light_contrib * transmitted_shadow;
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
 }
