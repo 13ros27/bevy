@@ -13,6 +13,7 @@
     ambient,
     irradiance_volume,
     mesh_types::{MESH_FLAGS_SHADOW_RECEIVER_BIT, MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT},
+    environment_map,
 }
 #import bevy_render::maths::{E, powsafe}
 
@@ -23,10 +24,6 @@
 #else   // PREPASS_PIPELINE
 #import bevy_pbr::forward_io::VertexOutput
 #endif  // PREPASS_PIPELINE
-
-#ifdef ENVIRONMENT_MAP
-#import bevy_pbr::environment_map
-#endif
 
 #ifdef TONEMAP_IN_SHADER
 #import bevy_core_pipeline::tonemapping::{tone_mapping, screen_space_dither}
@@ -402,6 +399,17 @@ fn apply_pbr_lighting(
         );
     }
 
+#ifdef ENVIRONMENT_MAP
+#ifdef STANDARD_MATERIAL_DIFFUSE_OR_SPECULAR_TRANSMISSION
+    let transmitted_environment_light = calculate_transmitted_environment_light(
+        &lighting_input,
+        in.material.ior,
+        in.material.thickness,
+        &clusterable_object_index_ranges,
+    );
+#endif // STANDARD_MATERIAL_DIFFUSE_OR_SPECULAR_TRANSMISSION
+#endif // ENVIRONMENT_MAP
+
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
     // NOTE: We use the diffuse transmissive color, the second Lambertian lobe's calculated
     // world position, inverted normal and view vectors, and the following simplified
@@ -412,24 +420,12 @@ fn apply_pbr_lighting(
     // F0 = vec3<f32>(0.0)
     // diffuse_occlusion = vec3<f32>(1.0)
     transmitted_light += ambient::ambient_light(diffuse_transmissive_lobe_world_position, -in.N, -in.V, 1.0, diffuse_transmissive_color, vec3<f32>(0.0), 1.0, vec3<f32>(1.0));
-#endif
 
 #ifdef ENVIRONMENT_MAP
-
-#ifdef STANDARD_MATERIAL_DIFFUSE_OR_SPECULAR_TRANSMISSION
-    let transmitted_environment_light = calculate_transmitted_environment_light(
-        &lighting_input,
-        in.material.ior,
-        in.material.thickness,
-        &clusterable_object_index_ranges,
-    );
-#endif // STANDARD_MATERIAL_DIFFUSE_OR_SPECULAR_TRANSMISSION
-
-#ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
     transmitted_light += transmitted_environment_light.diffuse * diffuse_transmissive_color;
-#endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
-
 #endif // ENVIRONMENT_MAP
+
+#endif
 
 #ifdef STANDARD_MATERIAL_SPECULAR_TRANSMISSION
     apply_specular_transmission(
@@ -437,7 +433,7 @@ fn apply_pbr_lighting(
         in.world_position,
         in.frag_coord.xyz,
         view_z,
-        lightmap_light,
+        lighting_input,
         in.material,
 #ifdef ENVIRONMENT_MAP
         transmitted_environment_light,
@@ -616,9 +612,9 @@ fn apply_specular_transmission(
     view_z: f32,
     lighting_input: lighting::LightingInput,
     material: pbr_types::StandardMaterial,
-#ifdef STANDARD_MATERIAL_SPECULAR_TRANSMISSION
+#ifdef ENVIRONMENT_MAP
     transmitted_environment_light: environment_map::EnvironmentMapLight,
-#endif // STANDARD_MATERIAL_SPECULAR_TRANSMISSION
+#endif // ENVIRONMENT_MAP
 ) {
     let specular_transmissive_color = material.specular_transmission * material.base_color.rgb;
 
@@ -633,7 +629,7 @@ fn apply_specular_transmission(
         world_position,
         frag_coord,
         view_z,
-        lighting_input.N,
+        lighting_input.layers[LAYER_BASE].N,
         lighting_input.V,
         lighting_input.F0_,
         material.ior,
