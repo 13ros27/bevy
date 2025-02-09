@@ -549,8 +549,10 @@ fn apply_pbr_lighting(
     transmissive_environment_light_input.layers[LAYER_BASE].N = -in.N;
     transmissive_environment_light_input.V = in.V;
     transmissive_environment_light_input.layers[LAYER_BASE].R = T;
-    transmissive_environment_light_input.layers[LAYER_BASE].perceptual_roughness = lighting_input.perceptual_roughness;
-    transmissive_environment_light_input.layers[LAYER_BASE].roughness = lighting_input.roughness;
+    transmissive_environment_light_input.layers[LAYER_BASE].perceptual_roughness =
+        lighting_input.layers[LAYER_BASE].perceptual_roughness;
+    transmissive_environment_light_input.layers[LAYER_BASE].roughness =
+        lighting_input.layers[LAYER_BASE].roughness;
     transmissive_environment_light_input.F0_ = vec3<f32>(1.0);
     transmissive_environment_light_input.F_ab = vec2(0.1);
 #ifdef STANDARD_MATERIAL_CLEARCOAT
