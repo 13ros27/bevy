@@ -350,45 +350,19 @@ fn apply_pbr_lighting(
             i = i + 1u) {
         let light_id = clustering::get_clusterable_object_id(i);
 
-        // If we're lightmapped, disable diffuse contribution from the light if
-        // requested, to avoid double-counting light.
-#ifdef LIGHTMAP
-        let enable_diffuse =
-            (view_bindings::clusterable_objects.data[light_id].flags &
-                mesh_view_types::POINT_LIGHT_FLAGS_AFFECTS_LIGHTMAPPED_MESH_DIFFUSE_BIT) != 0u;
-#else   // LIGHTMAP
-        let enable_diffuse = true;
-#endif  // LIGHTMAP
-
-        var shadow: f32 = 1.0;
-        if ((in.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
-                && (view_bindings::clusterable_objects.data[light_id].flags & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
-            shadow = shadows::fetch_point_shadow(light_id, in.world_position, in.world_normal);
-        }
-
-        let light_contrib = lighting::point_light(light_id, &lighting_input, enable_diffuse);
-        direct_light += light_contrib * shadow;
-
+        calculate_point_light_contribution(
+            light_id,
+            in.world_position,
+            in.world_normal,
+            in.flags,
+            &lighting_input,
+            &direct_light,
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
-        // NOTE: We use the diffuse transmissive color, the second Lambertian lobe's calculated
-        // world position, inverted normal and view vectors, and the following simplified
-        // values for a fully diffuse transmitted light contribution approximation:
-        //
-        // roughness = 1.0;
-        // NdotV = 1.0;
-        // R = vec3<f32>(0.0) // doesn't really matter
-        // F_ab = vec2<f32>(0.1)
-        // F0 = vec3<f32>(0.0)
-        var transmitted_shadow: f32 = 1.0;
-        if ((in.flags & (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)) == (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)
-                && (view_bindings::clusterable_objects.data[light_id].flags & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
-            transmitted_shadow = shadows::fetch_point_shadow(light_id, diffuse_transmissive_lobe_world_position, -in.world_normal);
-        }
-
-        let transmitted_light_contrib =
-            lighting::point_light(light_id, &transmissive_lighting_input, enable_diffuse);
-        transmitted_light += transmitted_light_contrib * transmitted_shadow;
-#endif
+            diffuse_transmissive_lobe_world_position,
+            &transmissive_lighting_input,
+            &transmitted_light,
+#endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
+        );
     }
 
     // Spot lights (direct)
@@ -770,7 +744,70 @@ fn calculate_emissive_light(
     return emissive_light * mix(1.0, view_bindings::view.exposure, emissive.a);
 }
 
+/// Calculates the contribution of a point light to `direct_light` and potentially `transmitted_light`.
+///
+/// Inputs:
+///  - `light_id` of a point light
+///  - `world_position`, `world_normal` and `flags` from `PbrInput`
+///  - `lighting_input`, `diffuse_transmissive_lobe_world_position` and
+///     `transmissive_lighting_input` from `apply_pbr_lighting`
+///  - `direct_light` and `transmitted_light` are mutated to add the contributions of this light
+fn calculate_point_light_contribution(
+    light_id: u32,
+    world_position: vec4<f32>,
+    world_normal: vec3<f32>,
+    flags: u32,
+    lighting_input: ptr<function, lighting::LightingInput>,
+    direct_light: ptr<function, vec3<f32>>,
+#ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
+    diffuse_transmissive_lobe_world_position: vec4<f32>,
+    transmissive_lighting_input: ptr<function, lighting::LightingInput>,
+    transmitted_light: ptr<function, vec3<f32>>,
+#endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
+) {
+    // If we're lightmapped, disable diffuse contribution from the light if
+    // requested, to avoid double-counting light.
+#ifdef LIGHTMAP
+    let enable_diffuse =
+        (view_bindings::clusterable_objects.data[light_id].flags &
+            mesh_view_types::POINT_LIGHT_FLAGS_AFFECTS_LIGHTMAPPED_MESH_DIFFUSE_BIT) != 0u;
+#else // LIGHTMAP
+    let enable_diffuse = true;
+#endif // LIGHTMAP
+
+    var shadow: f32 = 1.0;
+    if ((flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+            && (view_bindings::clusterable_objects.data[light_id].flags & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
+        shadow = shadows::fetch_point_shadow(light_id, world_position, world_normal);
+    }
+
+    let light_contrib = lighting::point_light(light_id, lighting_input, enable_diffuse);
+    *direct_light += light_contrib * shadow;
+
+#ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
+    // NOTE: We use the diffuse transmissive color, the second Lambertian lobe's calculated
+    // world position, inverted normal and view vectors, and the following simplified
+    // values for a fully diffuse transmitted light contribution approximation:
+    //
+    // roughness = 1.0;
+    // NdotV = 1.0;
+    // R = vec3<f32>(0.0) // doesn't really matter
+    // F_ab = vec2<f32>(0.1)
+    // F0 = vec3<f32>(0.0)
+    var transmitted_shadow: f32 = 1.0;
+    if ((flags & (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)) == (MESH_FLAGS_SHADOW_RECEIVER_BIT | MESH_FLAGS_TRANSMITTED_SHADOW_RECEIVER_BIT)
+            && (view_bindings::clusterable_objects.data[light_id].flags & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
+        transmitted_shadow = shadows::fetch_point_shadow(light_id, diffuse_transmissive_lobe_world_position, -world_normal);
+    }
+
+    let transmitted_light_contrib =
+        lighting::point_light(light_id, transmissive_lighting_input, enable_diffuse);
+    *transmitted_light += transmitted_light_contrib * transmitted_shadow;
+#endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
+}
+
 /// Constructs the `LightingInput` from `PbrInput`.
+// TODO: Should this be moved into `pbr_lighting.wgsl`?
 fn construct_lighting_input(pbr_input: pbr_types::PbrInput) -> lighting::LightingInput {
     let N = pbr_input.N;
     let V = pbr_input.V;
