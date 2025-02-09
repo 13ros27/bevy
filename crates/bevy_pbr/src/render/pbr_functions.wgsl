@@ -815,13 +815,13 @@ fn construct_lighting_input(pbr_input: pbr_types::PbrInput) -> lighting::Lightin
         lighting::perceptualRoughnessToRoughness(material.clearcoat_perceptual_roughness);
 
     lighting_input.clearcoat_strength = material.clearcoat;
-#endif  // STANDARD_MATERIAL_CLEARCOAT
+#endif // STANDARD_MATERIAL_CLEARCOAT
 
 #ifdef STANDARD_MATERIAL_ANISOTROPY
     lighting_input.anisotropy = pbr_input.anisotropy_strength;
     lighting_input.Ta = pbr_input.anisotropy_T;
     lighting_input.Ba = pbr_input.anisotropy_B;
-#endif  // STANDARD_MATERIAL_ANISOTROPY
+#endif // STANDARD_MATERIAL_ANISOTROPY
 
     return lighting_input;
 }
