@@ -295,9 +295,6 @@ fn apply_pbr_lighting(
 
     let specular_transmissive_color = specular_transmission * in.material.base_color.rgb;
 
-    let diffuse_occlusion = in.diffuse_occlusion;
-    let specular_occlusion = in.specular_occlusion;
-
     // Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886"
     let NdotV = max(dot(in.N, in.V), 0.0001);
     let R = reflect(-in.V, in.N);
@@ -747,13 +744,6 @@ fn calculate_indirect_light(
 #else   // STANDARD_MATERIAL_ANISOTROPY
     let environment_map_lighting_input = lighting_input;
 #endif  // STANDARD_MATERIAL_ANISOTROPY
-
-    // TODO: Unused?
-    let environment_light = environment_map::environment_map_light(
-        environment_map_lighting_input,
-        clusterable_object_index_ranges,
-        found_diffuse_indirect,
-    );
 
     // If screen space reflections are going to be used for this material, don't
     // accumulate environment map light yet. The SSR shader will do it.
