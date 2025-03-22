@@ -100,7 +100,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }
 
 #ifdef ENVIRONMENT_MAP
-    var lighting_input = pbr_functions::construct_lighting_input(pbr_input);
+    var lighting_input = pbr_lighting::lighting_input_from_pbr_input(pbr_input);
     let R = lighting_input.layers[LAYER_BASE].R;
 #else // ENVIRONMENT_MAP
     // Calculate the reflection vector.

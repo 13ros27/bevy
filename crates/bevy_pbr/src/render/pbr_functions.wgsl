@@ -286,7 +286,7 @@ fn apply_pbr_lighting(
     var transmitted_light: vec3<f32> = vec3<f32>(0.0);
 
     // Pack all the values into a structure.
-    var lighting_input = construct_lighting_input(in);
+    var lighting_input = lighting::lighting_input_from_pbr_input(in);
 
     // And do the same for transmissive if we need to.
 #ifdef STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
@@ -916,66 +916,6 @@ fn contribute_directional_light(
         lighting::directional_light(light_id, &transmissive_lighting_input, enable_diffuse);
     *transmitted_light += transmitted_light_contrib * transmitted_shadow;
 #endif // STANDARD_MATERIAL_DIFFUSE_TRANSMISSION
-}
-
-/// Constructs the `LightingInput` from `PbrInput`.
-// TODO: Should this be moved into `pbr_lighting.wgsl`?
-fn construct_lighting_input(pbr_input: pbr_types::PbrInput) -> lighting::LightingInput {
-    let N = pbr_input.N;
-    let V = pbr_input.V;
-    let material = pbr_input.material;
-
-    var lighting_input: lighting::LightingInput;
-
-    lighting_input.layers[LAYER_BASE].N = N;
-
-    // Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886"
-    lighting_input.layers[LAYER_BASE].R = reflect(-V, N);
-    let NdotV = max(dot(N, V), 0.0001);
-    lighting_input.layers[LAYER_BASE].NdotV = NdotV;
-
-    lighting_input.layers[LAYER_BASE].perceptual_roughness = material.perceptual_roughness;
-    // calculate non-linear roughness from linear perceptualRoughness
-    lighting_input.layers[LAYER_BASE].roughness =
-        lighting::perceptualRoughnessToRoughness(material.perceptual_roughness);
-
-    lighting_input.P = pbr_input.world_position.xyz;
-    lighting_input.V = V;
-
-    lighting_input.diffuse_color = calculate_diffuse_color(
-        material.base_color.rgb,
-        material.metallic,
-        material.specular_transmission,
-        material.diffuse_transmission
-    );
-
-    lighting_input.F0_ = calculate_F0(material.base_color.rgb, material.metallic, material.reflectance);
-    lighting_input.F_ab = lighting::F_AB(material.perceptual_roughness, NdotV);
-
-#ifdef STANDARD_MATERIAL_CLEARCOAT
-    // Do the above calculations again for the clearcoat layer. Remember that
-    // the clearcoat can have its own roughness and its own normal.
-    let clearcoat_N = pbr_input.clearcoat_N;
-
-    lighting_input.layers[LAYER_CLEARCOAT].N = clearcoat_N;
-
-    lighting_input.layers[LAYER_CLEARCOAT].R = reflect(-V, clearcoat_N);
-    lighting_input.layers[LAYER_CLEARCOAT].NdotV = max(dot(clearcoat_N, V), 0.0001);
-
-    lighting_input.layers[LAYER_CLEARCOAT].perceptual_roughness = material.clearcoat_perceptual_roughness;
-    lighting_input.layers[LAYER_CLEARCOAT].roughness =
-        lighting::perceptualRoughnessToRoughness(material.clearcoat_perceptual_roughness);
-
-    lighting_input.clearcoat_strength = material.clearcoat;
-#endif // STANDARD_MATERIAL_CLEARCOAT
-
-#ifdef STANDARD_MATERIAL_ANISOTROPY
-    lighting_input.anisotropy = pbr_input.anisotropy_strength;
-    lighting_input.Ta = pbr_input.anisotropy_T;
-    lighting_input.Ba = pbr_input.anisotropy_B;
-#endif // STANDARD_MATERIAL_ANISOTROPY
-
-    return lighting_input;
 }
 #endif // PREPASS_FRAGMENT
 
